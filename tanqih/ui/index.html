@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تنقيح</title>
+<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
+<script>
+  try { const t = localStorage.getItem('cut.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) { }
+</script>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header id="top">
+  <button id="btnHome" class="brand" title="المقاطع">✂ تنقيح</button>
+  <span id="crumb" class="crumb hidden"><span class="sep">›</span><span id="fileName"></span></span>
+  <div class="spacer"></div>
+  <div id="job" class="job hidden" title=""><div class="bar"><i></i></div><span></span><button id="jobCancel" class="icon sm" title="إلغاء">✕</button></div>
+  <span id="saveState" class="save"></span>
+  <button id="btnTheme" class="icon" title="الوضع النهاري / الليلي">☾</button>
+  <button id="btnSettings" class="icon" title="الإعدادات">⚙</button>
+  <span class="fileOnly">
+    <button id="btnList" title="قائمة الأوقات لهذا الملف">قائمة الأوقات</button>
+    <button id="btnAssist" title="اطلب من أي مساعد ذكي تحديد الحدود بدقة">المساعد الذكي</button>
+    <span class="dropdown">
+      <button id="btnMore" class="icon" title="المزيد">⋯</button>
+      <span id="moreMenu" class="pop hidden">
+        <button id="btnPrepare">تجهيز / تفريغ النوافذ</button>
+        <button id="btnFull">تفريغ الملف كاملًا (بطيء)</button>
+        <button id="btnBulk" title="قبول كل البنود ذات الثقة العالية التي لم تُحسم">قبول المقترحات عالية الثقة</button>
+        <button id="btnOpenOut">فتح مجلد الإخراج</button>
+        <button id="btnHelp">الاختصارات</button>
+      </span>
+    </span>
+    <button id="btnRender" class="primary">تصدير</button>
+  </span>
+</header>
+
+<!-- ================= home: folders and recordings ================= -->
+<section id="home" class="hidden">
+  <div class="homeWrap">
+    <div class="homeHead">
+      <h1>المقاطع</h1>
+      <div class="spacer"></div>
+      <button id="btnPrepAll" class="hidden" title="جهّز بالترتيب كل ملف له قائمة أوقات ولم يُجهّز">جهّز كل ما له قائمة</button>
+      <button id="btnAddFolder" class="primary">+ أضف مجلدًا</button>
+    </div>
+    <div id="folders"></div>
+    <div id="welcome" class="welcome hidden">
+      <h2>أهلًا بك</h2>
+      <p>يحذف هذا البرنامج من التسجيلات الطويلة ما ليس منها (مزاح، كلام جانبي، عطاس، سكتات…) اعتمادًا على أوقات تقريبية يكتبها المراجعون، ثم تراجع أنت كل قصّة بأذنك قبل التصدير.</p>
+      <ol class="steps">
+        <li><b>أضف مجلدًا</b> فيه التسجيلات.</li>
+        <li><b>الصق قائمة الأوقات</b> لكل ملف، أو ضعها في ملف نصي بنفس اسم التسجيل (<span class="ltr">درس 05.txt</span> بجوار <span class="ltr">درس 05.mp3</span>).</li>
+        <li><b>جهّز</b>: يحلّل البرنامج الصوت ويفرّغ ما حول كل وقت. يعمل على جهازك ولا يرفع شيئًا.</li>
+        <li><b>اختياري:</b> انسخ نص «المساعد الذكي» إلى أي مساعد (ChatGPT أو Claude أو Gemini…) ليحدّد الحدود بدقة، والصق رده.</li>
+        <li><b>راجع</b> كل بند: استمع للوصلة، عدّل الحدّين، واقبل أو ارفض.</li>
+        <li><b>صدّر</b>: يُكتب الملف المنقّح في مجلد «منقح» بجوار الأصل، مع سجل بالقصّات.</li>
+      </ol>
+      <button class="primary" onclick="document.getElementById('btnAddFolder').click()">+ أضف أول مجلد</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= one recording ================= -->
+<div id="fileView" class="hidden">
+<div id="overviewWrap">
+  <canvas id="overview" height="30"></canvas>
+  <div id="ovTip" class="tip hidden"></div>
+</div>
+
+<main>
+  <aside id="side">
+    <div id="stats" class="stats"></div>
+    <button id="btnAdd" class="wide" title="أضف قصًّا لم يرد في القائمة (N)">+ قص جديد</button>
+    <div class="filters" id="filters">
+      <button data-f="all" class="on">الكل</button>
+      <button data-f="open">لم يُحسم</button>
+      <button data-f="approved">يُقص</button>
+      <button data-f="kept">لا يُقص</button>
+    </div>
+    <ol id="list"></ol>
+  </aside>
+
+  <section id="editor">
+    <div id="empty" class="empty"></div>
+    <div id="panel" class="hidden">
+      <div class="itemHead">
+        <div class="titleRow">
+          <h2 id="iLabel"></h2>
+          <span id="iStatus" class="status"></span>
+        </div>
+        <div class="meta"><span id="iNum"></span> · <span id="iCat"></span> · <span id="iConf" class="conf"></span><span id="iMeta"></span></div>
+        <div id="iReason" class="reason"></div>
+      </div>
+
+      <div class="waveBox">
+        <canvas id="wave" height="170"></canvas>
+        <div class="waveTools">
+          <button id="zAll" class="icon sm" title="النافذة كاملة">⤢</button>
+          <button id="bWiden" class="icon sm" title="وسّع النافذة دقيقة من كل جهة">⇔</button>
+          <button id="bSnap" class="icon sm" title="ألصق الحدّين بأقرب سكتة (F)">⌇</button>
+        </div>
+        <div id="waveTip" class="tip hidden"></div>
+        <div id="loading" class="loading hidden">تحميل الصوت…</div>
+      </div>
+
+      <div class="transport">
+        <button id="bPlay" class="play" title="تشغيل / إيقاف (مسافة)">▶</button>
+        <button id="bSeam" title="استمع للوصلة كما ستُسمع بعد القص (P)">استمع للوصلة</button>
+        <button id="bCut" class="ghost" title="استمع للجزء المحذوف (C)">المحذوف</button>
+        <button id="bSpeed" class="ghost speedBtn" title="سرعة السماع — انقر للتغيير، أو [ و ]">1×</button>
+        <span class="dropdown">
+          <button id="bOpts" class="icon" title="خيارات السماع">♪</button>
+          <span id="optsPop" class="pop hidden">
+            <label class="chk"><input type="checkbox" id="skipCuts"> تخطَّ المحذوف أثناء التشغيل</label>
+            <label class="chk"><input type="checkbox" id="skipPauses"> اختصر السكتات الطويلة</label>
+            <span class="popHint">للسماع فقط، ولا يغيّران الملف النهائي.</span>
+          </span>
+        </span>
+        <div class="spacer"></div>
+        <div class="edge" id="edgeStart" title="−/+ : عُشر ثانية · مع Shift: ثانية · S: عند المؤشر · انقر الوقت للتقريب">
+          <span class="lbl">من</span>
+          <button data-d="-0.1" class="icon sm">−</button>
+          <span class="tc" id="tStart"></span>
+          <button data-d="0.1" class="icon sm">+</button>
+        </div>
+        <div class="edge" id="edgeEnd" title="−/+ : عُشر ثانية · مع Shift: ثانية · E: عند المؤشر · انقر الوقت للتقريب">
+          <span class="lbl">إلى</span>
+          <button data-d="-0.1" class="icon sm">−</button>
+          <span class="tc" id="tEnd"></span>
+          <button data-d="0.1" class="icon sm">+</button>
+        </div>
+      </div>
+
+      <div class="decide">
+        <button id="dApprove" class="ok" title="Enter">✓ يُقص</button>
+        <button id="dKeep" class="keep" title="K">✗ لا يُقص</button>
+        <input id="iNote" placeholder="ملاحظة…">
+        <button id="dUndo" class="icon" title="تراجع (Ctrl+Z)">↶</button>
+        <button id="dReset" class="icon" title="أعده مقترحًا">↺</button>
+        <button id="dDelete" class="icon danger hidden" title="حذف هذا البند المضاف">🗑</button>
+      </div>
+
+      <div class="freeBar hidden" id="freeBar">
+        <span>موضع حر في التسجيل.</span>
+        <button id="bNewHere" class="primary">+ قص جديد من هنا</button>
+        <span class="hint">أو اسحب على الموجة مع Shift</span>
+      </div>
+
+      <div class="trHead">
+        <span>التفريغ</span>
+        <span class="hint" title="نقرة: تشغيل من الكلمة&#10;Shift + نقرة: يبدأ القص قبلها&#10;Ctrl + نقرة: ينتهي القص بعدها&#10;زر الفأرة الأيمن: قائمة">ⓘ طريقة الاستعمال</span>
+      </div>
+      <div id="transcript" class="transcript"></div>
+    </div>
+  </section>
+</main>
+</div>
+
+<div id="menu" class="menu hidden">
+  <button data-a="play">▶ تشغيل من هنا</button>
+  <button data-a="start">⟦ يبدأ القص قبل هذه الكلمة</button>
+  <button data-a="end">⟧ ينتهي القص بعد هذه الكلمة</button>
+  <button data-a="new">+ قص جديد يبدأ هنا</button>
+</div>
+
+<!-- ================= dialogs ================= -->
+<div id="help" class="modal hidden"><div class="card">
+  <h3>الاختصارات</h3>
+  <table>
+    <tr><td><kbd>مسافة</kbd></td><td>تشغيل / إيقاف من المؤشر</td></tr>
+    <tr><td><kbd>P</kbd></td><td>استمع للوصلة (٤ ثوانٍ قبل القص ثم ٤ بعده)</td></tr>
+    <tr><td><kbd>C</kbd></td><td>استمع للمحذوف</td></tr>
+    <tr><td><kbd>Enter</kbd> / <kbd>K</kbd></td><td>يُقص / لا يُقص، والانتقال للتالي</td></tr>
+    <tr><td><kbd>↓</kbd> / <kbd>↑</kbd></td><td>البند التالي / السابق</td></tr>
+    <tr><td><kbd>S</kbd> / <kbd>E</kbd></td><td>البداية / النهاية عند المؤشر</td></tr>
+    <tr><td><kbd>F</kbd></td><td>ألصق الحدّين بأقرب سكتة</td></tr>
+    <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>تحريك المؤشر ثانية (مع Shift: ٥ ثوانٍ)</td></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>إبطاء / تسريع السماع</td></tr>
+    <tr><td><kbd>N</kbd></td><td>قص جديد</td></tr>
+    <tr><td><kbd>Ctrl+Z</kbd></td><td>تراجع</td></tr>
+    <tr><td>سحب الحافة الحمراء</td><td>تعديل البداية أو النهاية</td></tr>
+    <tr><td><b>Shift</b> + سحب</td><td>تحديد مقطع جديد على الموجة</td></tr>
+    <tr><td>عجلة الفأرة</td><td>تكبير الموجة · مع Shift: تحريك</td></tr>
+  </table>
+  <div class="row"><button class="primary" data-close>حسنًا</button></div>
+</div></div>
+
+<div id="addDlg" class="modal hidden"><div class="card">
+  <h3>قص جديد</h3>
+  <div class="form">
+    <label>البداية <input id="aStart" dir="ltr" placeholder="1:23:45.5"></label>
+    <label>النهاية <input id="aEnd" dir="ltr" placeholder="1:24:10"></label>
+    <label class="full">الوصف <input id="aLabel" placeholder="مثلًا: مزح، كلام جانبي، سؤال غير مسموع…"></label>
+    <label class="full">التصنيف <select id="aCat"></select></label>
+  </div>
+  <div class="hint">الوقت بصيغة <span dir="ltr">س:د:ث</span> أو <span dir="ltr">د:ث</span>. ويمكنك أيضًا تحديد المقطع على الموجة بالسحب مع <b>Shift</b>.</div>
+  <div class="row">
+    <button id="aOk" class="primary">إضافة</button>
+    <button id="aCancel" class="ghost">إلغاء</button>
+    <label class="chk"><input type="checkbox" id="aApprove" checked> علّمه «يُقص»</label>
+  </div>
+  <div id="aErr" class="err"></div>
+</div></div>
+
+<div id="folderDlg" class="modal hidden"><div class="card">
+  <h3>إضافة مجلد</h3>
+  <p class="hint">اختر المجلد الذي فيه التسجيلات. سيُنشئ البرنامج بجوارها مجلدًا مخفيًا <span class="ltr">.tanqih</span> لملفات العمل، ومجلد «منقح» للنتائج.</p>
+  <div class="row"><button id="fPick" class="primary">اختر من الجهاز…</button></div>
+  <p class="hint" style="margin-top:14px">أو الصق مسار المجلد:</p>
+  <div class="row"><input id="fPath" dir="ltr" class="grow" placeholder="D:\Lectures\Series  أو  /Users/me/Lectures"><button id="fAdd">إضافة</button></div>
+  <div id="fErr" class="err"></div>
+  <div class="row end"><button class="ghost" data-close>إغلاق</button></div>
+</div></div>
+
+<div id="listDlg" class="modal hidden"><div class="card wide">
+  <h3>قائمة الأوقات <span id="lName" class="hint"></span></h3>
+  <div class="listGrid">
+    <div class="col">
+      <textarea id="lText" spellcheck="false" placeholder="الصق قائمة المراجِع هنا، كل موضع في سطر:
+
+0:08:00 عطسة
+1:00:50 - 1:01:30 رد السلام
+من 1:10:00 إلى 1:12:30 مزح
+1:30:00 - النهاية   نهاية الدرس"></textarea>
+      <div class="opts">
+        <label class="chk"><input type="checkbox" id="lRemaining"> الأوقات كلها من <b>الوقت المتبقي</b> (عدّ تنازلي)</label>
+        <label class="chk">الوقت ذو الجزأين مثل <span class="ltr">12:30</span> يعني
+          <select id="lTwo"><option value="ms">دقائق:ثوانٍ</option><option value="hm">ساعات:دقائق</option></select></label>
+      </div>
+      <details class="hint fmtHelp"><summary>ما الصيغ المفهومة؟</summary>
+        <ul>
+          <li>كل سطر فيه وقت أو وقتان يصير بندًا، وباقي السطر هو الوصف. والأسطر بلا أوقات تُتجاهل.</li>
+          <li>الأوقات: <span class="ltr">1:02:03</span> أو <span class="ltr">62:03</span> أو <span class="ltr">1.02.03</span>، والأرقام العربية <span class="ltr">١:٠٢:٠٣</span> مقبولة.</li>
+          <li>بين الوقتين: <span class="ltr">-</span> أو «إلى» أو «حتى»، ويُفهم «من … إلى …».</li>
+          <li>«النهاية» بعد الوقت تعني حتى آخر التسجيل، و«البداية» قبله تعني من أوله.</li>
+          <li>كلمة «متبقي» أو «معكوس» في السطر تعني أن وقته من العدّ التنازلي.</li>
+          <li>الوقت الواحد يعني «في هذا الموضع شيء»، ويحدّد البرنامج أو المساعد مداه.</li>
+          <li>كلمات مثل «فائدة» أو «وعظ» أو «يراجع» تجعل البند «يحتاج قرارك» بدل القص المباشر.</li>
+        </ul>
+      </details>
+    </div>
+    <div class="col">
+      <div id="lSummary" class="hint"></div>
+      <div class="tableWrap"><table id="lPreview" class="preview"></table></div>
+    </div>
+  </div>
+  <div class="row">
+    <button id="lSave" class="primary">حفظ</button>
+    <button class="ghost" data-close>إلغاء</button>
+    <span class="hint" id="lNote"></span>
+  </div>
+</div></div>
+
+<div id="assistDlg" class="modal hidden"><div class="card wide">
+  <h3>المساعد الذكي</h3>
+  <p class="hint">يعمل مع أي مساعد محادثة: ChatGPT أو Claude أو Gemini أو غيرها، ولا يحتاج مفتاحًا. انسخ النص إلى محادثة جديدة، ثم الصق رده كاملًا هنا. ويُرسَل إليه نص التفريغ فقط، لا الصوت.</p>
+  <div class="assistGrid">
+    <div class="col">
+      <h4>١. انسخ إلى المساعد</h4>
+      <label class="chk"><select id="asWhich"><option value="open">البنود التي لم تُحسم ولم تُعدّل</option><option value="all">كل البنود</option><option value="cur">البند المفتوح فقط</option></select></label>
+      <div id="asBatches" class="batches"></div>
+      <div id="asSkipped" class="hint"></div>
+    </div>
+    <div class="col">
+      <h4>٢. الصق رد المساعد</h4>
+      <textarea id="asReply" spellcheck="false" placeholder="الصق الرد هنا (يكفي أن يحتوي على كتلة ‎```json‎ … ‎```‎). إن كانت هناك عدة دفعات فالصق ردودها معًا أو واحدًا بعد الآخر."></textarea>
+      <label class="chk"><input type="checkbox" id="asForce"> طبّق حتى على البنود التي عدّلتُها بنفسي</label>
+      <div class="row"><button id="asApply" class="primary">طبّق الرد</button><span id="asReport" class="hint"></span></div>
+    </div>
+  </div>
+  <div class="row end"><button class="ghost" data-close>إغلاق</button></div>
+</div></div>
+
+<div id="settingsDlg" class="modal hidden"><div class="card">
+  <h3>الإعدادات</h3>
+  <div class="form">
+    <label>لغة التسجيلات
+      <select id="sLang"><option value="ar">العربية</option><option value="en">English</option><option value="ur">اردو</option><option value="fa">فارسی</option><option value="tr">Türkçe</option><option value="fr">Français</option><option value="">اكتشاف تلقائي</option></select></label>
+    <label>نموذج التفريغ
+      <select id="sModel"></select></label>
+    <label>عدد أنوية المعالج <input id="sThreads" type="number" min="0" max="64" dir="ltr"><span class="hint">0 = تلقائي</span></label>
+    <label>نطاق البحث حول كل وقت (ثوانٍ) <input id="sPad" type="number" min="30" max="600" dir="ltr"></label>
+    <label>صيغة الإخراج
+      <select id="sFormat"><option value="same">مثل الأصل</option><option value="m4a">M4A (AAC)</option><option value="mp3">MP3</option><option value="opus">OGG (Opus)</option><option value="flac">FLAC</option><option value="wav">WAV</option></select></label>
+    <label>معدل البت <select id="sBitrate"><option>64k</option><option>96k</option><option>128k</option><option>160k</option><option>192k</option><option>256k</option></select></label>
+    <label class="full">مجلد الإخراج <input id="sOut" dir="ltr" placeholder="فارغ = مجلد «منقح» بجوار كل تسجيل"></label>
+    <label>حجم دفعة المساعد (حروف) <input id="sBatch" type="number" min="5000" max="400000" step="5000" dir="ltr"></label>
+    <label>مسار ffmpeg <input id="sFfmpeg" dir="ltr" placeholder="فارغ = تلقائي"></label>
+  </div>
+  <div class="hint modelHint">النموذج <b>large-v3-turbo</b> أدق، ويفرّغ نحو ساعتين من الصوت في ساعة على معالج حديث. على الأجهزة الضعيفة اختر <b>small</b>. يُنزَّل النموذج أول مرة فقط (large نحو 1.6 GB).</div>
+  <div class="row"><button id="sSave" class="primary">حفظ</button><button class="ghost" data-close>إلغاء</button><span class="spacer"></span><span id="sVer" class="hint"></span></div>
+</div></div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/ui/app.js"></script>
+</body>
+</html>

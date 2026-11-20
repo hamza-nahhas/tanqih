@@ -1,0 +1,17 @@
+[project]
+name = "tanqih"
+version = "0.1.0"
+description = "تنقيح: حذف ما ليس من الدرس في التسجيلات الطويلة اعتمادًا على أوقات المراجعين، مع مراجعة كل قصّة بالأذن"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "faster-whisper>=1.1",
+    "numpy>=1.24",
+    "imageio-ffmpeg>=0.5",
+    # newer onnxruntime has no wheels for Intel Macs or macOS 13
+    "onnxruntime>=1.14,<1.24; sys_platform == 'darwin'",
+]
+
+[tool.uv]
+package = false
