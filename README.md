@@ -20,7 +20,7 @@
 
 1. نزّل البرنامج: من صفحة المستودع على GitHub اضغط **Code ← Download ZIP** وفكّ الضغط في مكان ثابت. أو بـ git:
    ```
-   git clone https://github.com/<user>/tanqih.git
+   git clone https://github.com/hamza-nahhas/tanqih.git
    ```
 2. شغّله:
    - **ويندوز**: انقر نقرًا مزدوجًا على `start-windows.bat`.
