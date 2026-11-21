@@ -278,7 +278,8 @@ function renderHead() {
   if (free) return;
   $('#iNum').textContent = it.n ? `بند ${it.n}` : 'بند مضاف';
   $('#iLabel').textContent = it.label || '(بدون وصف)';
-  $('#iCat').textContent = it.category || '';
+  const cats = CFG.categories.includes(it.category) || !it.category ? CFG.categories : [it.category, ...CFG.categories];
+  $('#iCat').innerHTML = cats.map(c => `<option${c === it.category ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
   $('#iConf').textContent = CONF[it.confidence] || ''; $('#iConf').className = 'conf ' + (it.confidence || '');
   $('#iStatus').textContent = STATUS[it.status]; $('#iStatus').className = 'status ' + it.status;
   const raw = it.raw || {};
@@ -1116,6 +1117,8 @@ function openSettings() {
   $('#sLang').value = s.language ?? 'ar'; $('#sModel').value = s.whisper_model; $('#sThreads').value = s.cpu_threads;
   $('#sPad').value = s.window_pad; $('#sFormat').value = s.output_format; $('#sBitrate').value = s.output_bitrate;
   $('#sOut').value = s.output_dir || ''; $('#sBatch').value = s.assist_batch_chars; $('#sFfmpeg').value = s.ffmpeg || '';
+  $('#sSil').value = s.suggest_silence; $('#sLoud').checked = !!s.suggest_loud; $('#sBenefits').checked = !!s.export_benefits;
+  $('#sMarkers').checked = !!s.export_markers; $('#sUpdates').checked = !!s.check_updates;
   $('#sVer').textContent = 'الإصدار ' + (CFG.version || '');
   openModal('#settingsDlg');
 }
@@ -1124,6 +1127,8 @@ $('#sSave').onclick = async () => {
     language: $('#sLang').value, whisper_model: $('#sModel').value, cpu_threads: +$('#sThreads').value || 0,
     window_pad: +$('#sPad').value || 150, output_format: $('#sFormat').value, output_bitrate: $('#sBitrate').value,
     output_dir: $('#sOut').value.trim(), assist_batch_chars: +$('#sBatch').value || 30000, ffmpeg: $('#sFfmpeg').value.trim(),
+    suggest_silence: Math.max(0, +$('#sSil').value || 0), suggest_loud: $('#sLoud').checked, export_benefits: $('#sBenefits').checked,
+    export_markers: $('#sMarkers').checked, check_updates: $('#sUpdates').checked,
   });
   CFG.settings = r.settings; closeModal($('#settingsDlg')); toast('حُفظت الإعدادات');
 };
@@ -1185,9 +1190,79 @@ $('#btnRender').onclick = async () => {
   const open = S.items.filter(i => i.status === 'proposed' || i.status === 'pending').length;
   const n = S.items.filter(i => i.status === 'approved').length;
   if (!n) return toast('لا توجد قصّات مقبولة بعد', true);
-  if (!confirm(`سيُقص ${n} بندًا.` + (open ? `\n${open} بندًا لم يُحسم وسيُترك دون قص.` : '') + '\nمتابعة التصدير؟')) return;
-  await save(); startJob('render');
+  await flushSave();
+  let warns = [];
+  try { warns = (await api('/api/check/' + S.fid, {})).warnings; } catch (e) { console.warn(e); }
+  if (warns.some(w => w.level === 'warn')) return openCheck(warns, { n, open });
+  confirmRender(n, open);
 };
+function confirmRender(n, open) {
+  if (!confirm(`سيُقص ${n} بندًا.` + (open ? `\n${open} بندًا لم يُحسم وسيُترك دون قص.` : '') + '\nمتابعة التصدير؟')) return;
+  startJob('render');
+}
+
+/* seam check: before export, or from the menu */
+const KINDS = { repeat: 'كلام مكرر', in_word: 'داخل كلمة', not_silent: 'ليست في سكتة', tiny_gap: 'قصّتان متقاربتان', untranscribed: 'غير مفرَّغ' };
+function openCheck(warns, forExport) {
+  const box = $('#ckList'); box.innerHTML = '';
+  const w = warns.filter(x => x.level === 'warn'), info = warns.filter(x => x.level !== 'warn');
+  $('#ckIntro').textContent = !warns.length ? 'لم يُعثر على مشكلات في القصّات المقبولة.'
+    : `${w.length ? `${w.length} تنبيهًا يستحق السماع` : 'لا تنبيهات مهمة'}${info.length ? ` و${info.length} ملاحظة` : ''}. افتح كل بند واستمع للوصلة (P)، أو طبّق التعديل المقترح.`;
+  const row = x => {
+    const d = document.createElement('div'); d.className = 'ck ' + x.level;
+    d.innerHTML = `<span class="ckT ltr">${fmt(x.start)}</span><span class="ckK"></span><span class="ckM"></span><span class="ckB"><button class="sm" data-a="open">افتح</button>${x.fix ? '<button class="sm primary" data-a="fix">طبّق</button>' : ''}</span>`;
+    d.querySelector('.ckK').textContent = KINDS[x.kind] || x.kind;
+    d.querySelector('.ckM').textContent = (x.label ? `«${x.label}»: ` : '') + x.msg;
+    d.onclick = e => {
+      const a = e.target.closest('button')?.dataset.a; if (!a) return;
+      const it = S.items.find(i => i.id === x.id); if (!it) return;
+      if (a === 'open') { closeModal($('#checkDlg')); selectItem(it); }
+      if (a === 'fix') {
+        snap();
+        if (x.fix.start != null) it.start = +Math.min(x.fix.start, it.end - 0.05).toFixed(2);
+        if (x.fix.end != null) it.end = +Math.max(x.fix.end, it.start + 0.05).toFixed(2);
+        it.edited = true; changed();
+        d.classList.add('done'); e.target.textContent = 'طُبّق ✓'; e.target.disabled = true;
+      }
+    };
+    return d;
+  };
+  w.forEach(x => box.appendChild(row(x)));
+  if (info.length) {
+    const det = document.createElement('details'); det.className = 'ckInfo';
+    det.innerHTML = `<summary>ملاحظات أقل أهمية (${info.length})</summary>`;
+    info.forEach(x => det.appendChild(row(x)));
+    box.appendChild(det);
+  }
+  const ex = $('#ckExport');
+  ex.classList.toggle('hidden', !forExport);
+  ex.onclick = () => { closeModal($('#checkDlg')); confirmRender(forExport.n, forExport.open); };
+  openModal('#checkDlg');
+}
+$('#btnCheck').onclick = async () => {
+  if (!S.state) return toast('جهّز الملف أولًا', true);
+  await flushSave();
+  openCheck((await api('/api/check/' + S.fid, {})).warnings, null);
+};
+$('#btnMarkers').onclick = async () => {
+  if (!S.state) return toast('جهّز الملف أولًا', true);
+  await flushSave();
+  await api('/api/markers/' + S.fid, {});
+  toast('كُتبت العلامات في مجلد الإخراج'); api('/api/open', { id: S.fid, what: 'output' });
+};
+$('#iCat').onchange = e => { const it = S.cur; if (!it || it.free) return; snap(); it.category = e.target.value; it.edited = true; changed(); };
+
+/* a newer release on GitHub */
+async function checkUpdate() {
+  try {
+    const u = await api('/api/update');
+    if (!u.newer || localGet('updSeen') === u.latest) return;
+    $('#updLink').textContent = `إصدار جديد ${u.latest}`; $('#updLink').href = u.url;
+    $('#updLink').title = (u.notes || '') + '\n\nنزّله وضعه مكان المجلد القديم؛ عملك وإعداداتك لا تتأثر.';
+    $('#upd').classList.remove('hidden');
+    $('#updX').onclick = () => { localSet('updSeen', u.latest); $('#upd').classList.add('hidden'); };
+  } catch { }
+}
 $('#btnHelp').onclick = () => openModal('#help');
 $('#btnHome').onclick = () => { location.hash = ''; };
 $('#btnSettings').onclick = openSettings;
@@ -1233,4 +1308,4 @@ document.addEventListener('click', e => { const b = e.target.closest('button, in
 window.addEventListener('resize', () => { drawOverview(); drawWave(); });
 window.addEventListener('beforeunload', e => { if ($('#saveState').textContent.startsWith('غير')) { save(); e.preventDefault(); } });
 
-loadConfig().then(route).then(() => pollJobs(true)).catch(e => toast('خطأ: ' + e.message, true, 8000));
+loadConfig().then(route).then(() => { pollJobs(true); checkUpdate(); }).catch(e => toast('خطأ: ' + e.message, true, 8000));

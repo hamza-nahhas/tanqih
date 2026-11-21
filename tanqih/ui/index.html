@@ -15,6 +15,7 @@
   <button id="btnHome" class="brand" title="المقاطع">✂ تنقيح</button>
   <span id="crumb" class="crumb hidden"><span class="sep">›</span><span id="fileName"></span></span>
   <div class="spacer"></div>
+  <span id="upd" class="upd hidden"><a id="updLink" target="_blank" rel="noopener"></a><button id="updX" class="icon sm" title="إخفاء">✕</button></span>
   <div id="job" class="job hidden" title=""><div class="bar"><i></i></div><span></span><button id="jobCancel" class="icon sm" title="إلغاء">✕</button></div>
   <span id="saveState" class="save"></span>
   <button id="btnTheme" class="icon" title="الوضع النهاري / الليلي">☾</button>
@@ -28,6 +29,8 @@
         <button id="btnPrepare">تجهيز / تفريغ النوافذ</button>
         <button id="btnFull">تفريغ الملف كاملًا (بطيء)</button>
         <button id="btnBulk" title="قبول كل البنود ذات الثقة العالية التي لم تُحسم">قبول المقترحات عالية الثقة</button>
+        <button id="btnCheck">فحص الوصلات</button>
+        <button id="btnMarkers" title="ملف علامات لـ Audacity وآخر لـ DaVinci Resolve، دون تصدير الصوت">تصدير العلامات فقط</button>
         <button id="btnOpenOut">فتح مجلد الإخراج</button>
         <button id="btnHelp">الاختصارات</button>
       </span>
@@ -90,7 +93,7 @@
           <h2 id="iLabel"></h2>
           <span id="iStatus" class="status"></span>
         </div>
-        <div class="meta"><span id="iNum"></span> · <span id="iCat"></span> · <span id="iConf" class="conf"></span><span id="iMeta"></span></div>
+        <div class="meta"><span id="iNum"></span> · <select id="iCat" class="catSel" title="التصنيف. اختر «فائدة» ليُحفظ هذا المقطع في ملف الفوائد عند التصدير."></select> · <span id="iConf" class="conf"></span><span id="iMeta"></span></div>
         <div id="iReason" class="reason"></div>
       </div>
 
@@ -273,6 +276,13 @@
   <div class="row end"><button class="ghost" data-close>إغلاق</button></div>
 </div></div>
 
+<div id="checkDlg" class="modal hidden"><div class="card wide">
+  <h3>فحص الوصلات</h3>
+  <p class="hint" id="ckIntro"></p>
+  <div id="ckList" class="ckList"></div>
+  <div class="row end"><button id="ckExport" class="primary hidden">صدّر على أي حال</button><button class="ghost" data-close>إغلاق</button></div>
+</div></div>
+
 <div id="settingsDlg" class="modal hidden"><div class="card">
   <h3>الإعدادات</h3>
   <div class="form">
@@ -288,6 +298,11 @@
     <label class="full">مجلد الإخراج <input id="sOut" dir="ltr" placeholder="فارغ = مجلد «منقح» بجوار كل تسجيل"></label>
     <label>حجم دفعة المساعد (حروف) <input id="sBatch" type="number" min="5000" max="400000" step="5000" dir="ltr"></label>
     <label>مسار ffmpeg <input id="sFfmpeg" dir="ltr" placeholder="فارغ = تلقائي"></label>
+    <label>اقترح اختصار السكتات الأطول من (ثوانٍ) <input id="sSil" type="number" min="0" max="120" step="0.5" dir="ltr"><span class="hint">0 = لا تقترح</span></label>
+    <label class="full chk"><input type="checkbox" id="sLoud"> اقترح الأصوات المرتفعة المفاجئة في الملف كله (عطاس، سعال، طرق)</label>
+    <label class="full chk"><input type="checkbox" id="sBenefits"> عند التصدير اكتب أيضًا ملفًا يجمع المقاطع المصنّفة «فائدة»</label>
+    <label class="full chk"><input type="checkbox" id="sMarkers"> عند التصدير اكتب أيضًا علامات لـ Audacity و DaVinci Resolve</label>
+    <label class="full chk"><input type="checkbox" id="sUpdates"> نبّهني إذا صدر إصدار جديد (يسأل GitHub مرة كل بضع ساعات)</label>
   </div>
   <div class="hint modelHint">النموذج <b>large-v3-turbo</b> أدق، ويفرّغ نحو ساعتين من الصوت في ساعة على معالج حديث. على الأجهزة الضعيفة اختر <b>small</b>. يُنزَّل النموذج أول مرة فقط (large نحو 1.6 GB).</div>
   <div class="row"><button id="sSave" class="primary">حفظ</button><button class="ghost" data-close>إلغاء</button><span class="spacer"></span><span id="sVer" class="hint"></span></div>

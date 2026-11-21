@@ -8,7 +8,7 @@ Prints "PROGRESS <0-100|-> <message>" lines that the server shows in the interfa
 import sys
 from pathlib import Path
 
-from .items import auto_propose, load_state, merge_list, needed_windows, save_state
+from .items import auto_propose, load_state, merge_list, needed_windows, save_state, suggest
 from .media import analyse, ensure_wav, frame_db
 from .transcribe import add_transcript
 
@@ -29,6 +29,7 @@ def prepare(media, full=False, transcribe=True):
     st = load_state(media)
     merge_list(st, an)
     auto_propose(st, an, frame_db(media))
+    suggest(st, an, frame_db(media))
     save_state(media, st)
     tr = None
     if full:
@@ -38,6 +39,7 @@ def prepare(media, full=False, transcribe=True):
     if tr and tr["words"]:
         st = load_state(media)  # re-read: the interface may have saved meanwhile
         auto_propose(st, an, frame_db(media), tr["words"])
+        suggest(st, an, frame_db(media), tr["words"])
         save_state(media, st)
     progress(100, "اكتمل التجهيز")
 

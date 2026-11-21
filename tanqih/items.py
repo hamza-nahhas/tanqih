@@ -123,7 +123,9 @@ def needed_windows(st):
     wins = []
     for it in st["items"]:
         s, e = it["approx"]
-        if e - s <= long_cut:
+        if it.get("source") == "auto":   # found by the program itself: a little context is enough
+            wins.append([max(0, s - 20), min(D, e + 20)])
+        elif e - s <= long_cut:
             wins.append([max(0, s - pad), min(D, e + pad)])
         else:
             wins.append([max(0, s - pad), min(D, s + pad)])
@@ -232,4 +234,59 @@ def auto_propose(st, analysis, db, words=None):
             it.update(start=round(s + 0.35, 2), end=round(e - 0.35, 2),
                       status="proposed", confidence="medium", proposed_by="auto",
                       reason="اقتراح آلي: أطول سكتة قرب الوقت المذكور، تُختصر إلى نحو ثلثي ثانية.")
+    return st
+
+
+# ---------- suggestions the reviewers did not write ----------
+
+def _overlaps(a, b, items, pad=2.0):
+    return any(i["start"] - pad < b and i["end"] + pad > a for i in items)
+
+
+def suggest(st, analysis, db, words=None):
+    """Add items for long silences and sudden loud sounds anywhere in the recording.
+    Undecided, untouched suggestions are rebuilt each time; decided ones are kept."""
+    cfg = settings()
+    D, pauses, sp = analysis["duration"], analysis["pauses"], analysis["speech_db"]
+    keep = [i for i in st["items"] if i.get("source") != "auto" or i.get("edited")
+            or i["status"] in ("approved", "kept")]
+    others = [i for i in keep]
+    new = []
+    min_sil = float(cfg.get("suggest_silence") or 0)
+    if min_sil > 0:
+        for s, e in pauses:
+            if e - s < min_sil or s < 1 or e > D - 1 or _overlaps(s, e, others, 0):
+                continue
+            a, b = round(s + 0.35, 2), round(e - 0.35, 2)
+            spoken = words is not None and any(s < (w["s"] + w["e"]) / 2 < e for w in words)
+            new.append({"id": f"S{int(s * 100)}", "label": f"سكتة {e - s:.0f} ث", "category": "سكتة",
+                        "start": a, "end": b, "status": "proposed",
+                        "confidence": "low" if spoken else "high",
+                        "reason": ("اقتراح آلي: سكتة طويلة لم يذكرها المراجعون، تُختصر إلى نحو ثلثي ثانية."
+                                   + (" لكن في التفريغ كلامًا داخلها، فاستمع قبل القبول." if spoken else ""))})
+    if cfg.get("suggest_loud", True) and db is not None:
+        for b0, b1, peak in loud_bursts(db, sp, 0, D, above=18, join=0.6):
+            if b1 - b0 > 3 or _overlaps(b0, b1, others + new, 1.0):
+                continue
+            pb, pa = _pause_before(b0 + 0.05, pauses), _pause_after(b1 - 0.05, pauses)
+            a = min(pb[0] + 0.12, (pb[0] + pb[1]) / 2) if pb and b0 - pb[1] < 1.5 else b0 - 0.25
+            b = max(pa[1] - 0.12, (pa[0] + pa[1]) / 2) if pa and pa[0] - b1 < 1.5 else b1 + 0.25
+            gap = _word_gap(words, b0, b1) if words else None
+            if gap:
+                a, b = gap[0] + min(0.15, (gap[1] - gap[0]) / 6), gap[1] - min(0.15, (gap[1] - gap[0]) / 6)
+            if b - a > 8:
+                a, b = b0 - 0.25, b1 + 0.25
+            new.append({"id": f"B{int(b0 * 100)}", "label": f"صوت مرتفع (+{peak:.0f} dB)", "category": "صوت مرتفع",
+                        "start": round(max(0, a), 2), "end": round(min(D, b), 2), "status": "pending",
+                        "confidence": "low",
+                        "reason": "اقتراح آلي: صوت مفاجئ أعلى بكثير من مستوى الكلام (عطاس أو سعال أو طرق أو ضحك). "
+                                  "قد يكون صوت المتكلم نفسه، فاستمع ثم قرّر."})
+    have = {i["id"] for i in keep}
+    for n in new:
+        if n["id"] in have:
+            continue
+        n.update(n="", action="cut", raw={}, approx=[n["start"], n["end"]], point=False, source="auto",
+                 proposed_by="auto", note="", window=[max(0, n["start"] - 20), min(D, n["end"] + 20)])
+        keep.append(n)
+    st["items"] = sorted(keep, key=lambda i: i["start"])
     return st

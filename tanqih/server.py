@@ -14,10 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import __version__, assist, cutlist
-from .config import (MODELS, SR, UI, add_folder, file_id, id_path, is_allowed, library, load_json,
+from . import __version__, assist, cutlist, seamcheck
+from .config import (MODELS, REPO, SR, UI, add_folder, file_id, id_path, is_allowed, library, load_json,
                      media_files, output_dir, remove_folder, save_settings, settings, work_dir)
-from .items import load_state, merge_list, save_state, auto_propose
+from .items import auto_propose, load_state, merge_list, save_state, suggest
 from .media import ensure_wav, frame_db, read_wav
 from .transcribe import load_transcript
 
@@ -220,6 +220,33 @@ def wav_bytes(samples):
     return buf.getvalue()
 
 
+_update = {"t": 0, "info": None}
+
+
+def update_info():
+    """The newest release on GitHub, checked at most every six hours. Sends nothing but the request."""
+    if not settings().get("check_updates", True):
+        return {"newer": False}
+    if time.time() - _update["t"] < 6 * 3600 and _update["info"] is not None:
+        return _update["info"]
+    info = {"newer": False, "current": __version__}
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
+                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "tanqih"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            rel = json.loads(r.read())
+        latest = str(rel.get("tag_name", "")).lstrip("vV")
+
+        def key(v):
+            return [int(x) if x.isdigit() else 0 for x in v.split(".")]
+        info.update(latest=latest, url=rel.get("html_url"), notes=(rel.get("body") or "")[:1500],
+                    newer=bool(latest) and key(latest) > key(__version__))
+    except Exception:  # noqa: BLE001  (offline, rate-limited, no release yet)
+        pass
+    _update.update(t=time.time(), info=info)
+    return info
+
+
 def open_in_os(path):
     if sys.platform == "win32":
         os.startfile(str(path))  # noqa: S606
@@ -294,6 +321,8 @@ class H(BaseHTTPRequestHandler):
                                        "categories": cutlist.CATEGORY_NAMES, "version": __version__})
             if parts == ["api", "jobs"]:
                 return self.send(200, JOBS.public())
+            if parts == ["api", "update"]:
+                return self.send(200, update_info())
             if parts[:2] == ["api", "file"] and len(parts) == 3:
                 m = media_of(parts[2])
                 d = work_dir(m)
@@ -382,7 +411,9 @@ class H(BaseHTTPRequestHandler):
                     an = load_json(work_dir(m) / "analysis.json")
                     if an:
                         merge_list(st, an)
-                        auto_propose(st, an, frame_db(m), load_transcript(m)["words"])
+                        words = load_transcript(m)["words"] or None
+                        auto_propose(st, an, frame_db(m), words)
+                        suggest(st, an, frame_db(m), words)
                     save_state(m, st)
                 queued = False
                 if b.get("prepare", True) and (an or st["list"]["text"].strip()):
@@ -400,6 +431,17 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200 if ok else 409, {"ok": ok})
             if act == "cancel":
                 return self.send(200, {"ok": JOBS.cancel(fid)})
+            if act == "check":
+                an = load_json(work_dir(m) / "analysis.json")
+                if not an:
+                    return self.send(400, {"error": "جهّز الملف أولًا"})
+                st = load_state(m)
+                return self.send(200, {"warnings": seamcheck.check(st, an, load_transcript(m), frame_db(m))})
+            if act == "markers":
+                from .render import write_markers
+                st = load_state(m)
+                files = write_markers(m, st)
+                return self.send(200, {"files": files})
             if act == "assist-export":
                 st = load_state(m)
                 an = load_json(work_dir(m) / "analysis.json")

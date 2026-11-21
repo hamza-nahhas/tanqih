@@ -7,6 +7,7 @@
     python -m tanqih words  <file> <from> <to>   one word per line with its times
     python -m tanqih prompt <file> [--all]   the text for an AI chat (all open items, or every item)
     python -m tanqih apply  <file> <proposals.json> [--force]   apply proposals (same JSON as the chat reply)
+    python -m tanqih check  <file>           check the approved cuts: words inside an edge, repeated speech, ...
     python -m tanqih render <file>           write the trimmed file from the approved cuts
 
 Times are seconds or h:mm:ss(.s). See AGENTS.md for working with a coding agent."""
@@ -76,6 +77,14 @@ def main():
             print(b["text"])
         if skipped:
             print("بنود لم تُفرَّغ نوافذها بعد: " + ", ".join(skipped), file=sys.stderr)
+    elif cmd == "check":
+        from .seamcheck import check
+        warns = check(st, an, load_transcript(media), frame_db(media))
+        for w in warns:
+            print(f"{'!' if w['level'] == 'warn' else '-'} {fmt(w['start'])} [{w['id']}] {w['msg']}"
+                  + (f"  -> {w['fix']}" if w["fix"] else ""))
+        if not warns:
+            print("لا مشكلات.")
     elif cmd == "apply":
         from .assist import apply_proposals, extract_json
         props = extract_json(Path(a[2]).read_text(encoding="utf-8"))

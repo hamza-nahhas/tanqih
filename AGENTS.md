@@ -15,6 +15,7 @@ python -m tanqih peek   <file> <from> <to>     # timed transcript lines, silent 
 python -m tanqih words  <file> <from> <to>     # one word per line: start end probability word
 python -m tanqih prompt <file> [--all]         # the same text the interface gives to chat assistants
 python -m tanqih apply  <file> proposals.json [--force]
+python -m tanqih check  <file>                 # approved cuts: edge inside a word, speech repeated after the join, ...
 python -m tanqih.worker transcribe <file> <from> <to>   # transcribe a range that has no transcript yet
 python -m tanqih prepare <file>                # analyse + transcribe around every item (if not done)
 ```
@@ -65,6 +66,8 @@ python -m tanqih prepare <file>                # analyse + transcribe around eve
    often been right.
 9. If something clearly unwanted lies inside a window you read but is not in the list, propose it
    as `new-...`.
+10. After the user approves cuts, run `check`. A "repeat" warning nearly always means rule 5 was
+    missed.
 
 ## Changing the code
 
@@ -72,6 +75,10 @@ python -m tanqih prepare <file>                # analyse + transcribe around eve
   `tanqih/server.py` (standard library only). Long jobs run as subprocesses of `tanqih/worker.py`
   and report through `PROGRESS <pct> <message>` lines.
 - Interface text is Arabic and right-to-left.
-- Tests: `uv run python -m unittest discover tests`.
+- Tests: `uv run python -m unittest discover tests` (set `TANQIH_TEST_WHISPER=1` to also load the
+  tiny speech model). GitHub Actions runs them on Windows, macOS (Apple Silicon and Intel) and
+  Linux, and checks that the launchers open the interface.
+- Releases: bump `__version__` in `tanqih/__init__.py` and `pyproject.toml`, run `uv lock`, then
+  tag `vX.Y.Z` and publish a GitHub release. The interface tells users about it.
 - Keep it working on Windows and macOS: use pathlib, pass ffmpeg arguments as lists, and do not
   rely on shell features.

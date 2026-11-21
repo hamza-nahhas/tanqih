@@ -151,3 +151,103 @@ class Render(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def tone_file(path, seconds=20, sr=16000, silent=()):
+    """A test recording: a tone with optional silent ranges."""
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        frames = bytearray()
+        for i in range(sr * seconds):
+            t = i / sr
+            quiet = any(a <= t < b for a, b in silent)
+            frames += struct.pack("<h", 0 if quiet else int(8000 * math.sin(i / 10)))
+        w.writeframes(bytes(frames))
+
+
+class Features(unittest.TestCase):
+    def test_split_at_pauses(self):
+        from tanqih.transcribe import split_at_pauses
+        parts = split_at_pauses(0, 400, [[88, 89], [181, 183], [300, 300.5]])
+        self.assertEqual(parts[0], [0, 88.5])
+        self.assertEqual(parts[-1][1], 400)
+        self.assertTrue(all(b - a < 140 for a, b in parts))
+
+    def test_seam_repeat_and_in_word(self):
+        import numpy as np
+        from tanqih import seamcheck
+        an = analysis(100.0)
+        db = np.full(5000, -60.0, dtype=np.float32)
+        db[int(20.0 / 0.02):int(20.6 / 0.02)] = -10   # speech across the start edge (20.3)
+        txt = "وحكى ابن التين عن قوم الحمد لله وحكى ابن التين عن قوم أنه"
+        ws, t = [], 10.0
+        for w in txt.split():
+            ws.append({"w": w, "s": t, "e": t + 0.4, "p": 0.9})
+            t += 0.5 if w != "قوم" else 3.0
+        tr = {"words": ws, "windows": [[0, 100]]}
+        # cut only the sneeze words: the first reading stays -> repeated after the join
+        st = {"items": [{"id": "a", "status": "approved", "start": 13.0, "end": 15.95, "label": "عطاس"}]}
+        w = seamcheck.check(st, an, tr, db)
+        rep = [x for x in w if x["kind"] == "repeat"]
+        self.assertEqual(len(rep), 1)
+        self.assertLess(rep[0]["fix"]["start"], 10.0)
+        st = {"items": [{"id": "b", "status": "approved", "start": 20.3, "end": 30.0, "label": "x"}]}
+        tr2 = {"words": [{"w": "كلمة", "s": 20.0, "e": 20.6, "p": 0.9}], "windows": [[0, 100]]}
+        self.assertEqual([x["kind"] for x in seamcheck.check(st, an, tr2, db)], ["in_word"])
+
+    def test_suggest(self):
+        import numpy as np
+        from tanqih import items as I
+        an = analysis(600.0)
+        an["pauses"].append([300.0, 309.0])
+        an["pauses"].sort()
+        db = np.full(30000, -40.0, dtype=np.float32)
+        db[int(400 / 0.02):int(400.4 / 0.02)] = 5      # +25 dB above speech: a sneeze
+        st = {"items": [], "duration": 600.0}
+        I.suggest(st, an, db)
+        cats = sorted(i["category"] for i in st["items"])
+        self.assertEqual(cats, ["سكتة", "صوت مرتفع"])
+        sil = next(i for i in st["items"] if i["category"] == "سكتة")
+        self.assertEqual((sil["start"], sil["end"], sil["confidence"]), (300.35, 308.65, "high"))
+        sil["status"] = "approved"
+        I.suggest(st, an, db)          # running again neither duplicates nor drops the decision
+        self.assertEqual(len(st["items"]), 2)
+
+    def test_prepare_markers_benefits(self):
+        from tanqih import config, render, worker
+        folder = Path(TMP) / "rec2"
+        folder.mkdir(exist_ok=True)
+        src = folder / "درس 01.wav"
+        tone_file(src, 20, silent=[(5, 11)])
+        st = items.load_state(src)
+        st["list"]["text"] = "0:00:14 - 0:00:16 فائدة جميلة\n0:00:02 - 0:00:03 مزح"
+        items.save_state(src, st)
+        config.save_settings({"output_format": "wav", "suggest_silence": 5})
+        worker.prepare(src, transcribe=False)
+        st = items.load_state(src)
+        self.assertEqual(sorted(i["category"] for i in st["items"]), ["سكتة", "فائدة", "مزح"])
+        for i in st["items"]:
+            i["status"] = "approved" if i["category"] != "فائدة" else "kept"
+        res = render.render(src, st, lambda *a: None)
+        aud, edl = res["markers"]
+        lines = Path(aud).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[0].startswith("2."))
+        self.assertIn("|C:ResolveColorYellow |M:فائدة: فائدة جميلة |D:", Path(edl).read_text(encoding="utf-8"))
+        with wave.open(res["benefits"]) as w:
+            self.assertAlmostEqual(w.getnframes() / w.getframerate(), 2.8, delta=0.1)
+
+
+@unittest.skipUnless(os.environ.get("TANQIH_TEST_WHISPER"), "set TANQIH_TEST_WHISPER=1 to load a speech model")
+class Whisper(unittest.TestCase):
+    def test_tiny_model_runs(self):
+        from tanqih import config, transcribe
+        folder = Path(TMP) / "rec3"
+        folder.mkdir(exist_ok=True)
+        src = folder / "tone.wav"
+        tone_file(src, 8)
+        config.save_settings({"whisper_model": "tiny"})
+        words, segs = transcribe.transcribe_range(src, 0, 8, duration=8)
+        self.assertIsInstance(words, list)

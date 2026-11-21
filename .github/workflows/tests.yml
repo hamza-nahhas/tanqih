@@ -1,0 +1,53 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows, Apple Silicon Mac, Intel Mac, Linux
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest]
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install (the same as the first run on a friend's computer)
+        run: uv sync --locked
+
+      - name: Unit tests, including a small speech model
+        env:
+          TANQIH_TEST_WHISPER: "1"
+        run: uv run python -m unittest discover tests -v
+
+      - name: The Windows launcher opens the interface
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Start-Process -FilePath cmd.exe -ArgumentList '/c', 'start-windows.bat' -WindowStyle Hidden
+          for ($i = 0; $i -lt 60; $i++) {
+            try { $r = Invoke-RestMethod http://127.0.0.1:8765/api/ping; if ($r.app -eq 'tanqih') { "ok $($r.version)"; exit 0 } } catch {}
+            Start-Sleep -Seconds 3
+          }
+          exit 1
+
+      - name: The macOS launcher opens the interface
+        if: runner.os != 'Windows'
+        run: |
+          bash start-mac.command > launcher.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:8765/api/ping; then exit 0; fi
+            sleep 3
+          done
+          cat launcher.log
+          exit 1

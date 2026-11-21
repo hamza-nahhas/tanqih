@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import output_dir, settings
-from .media import ffmpeg_exe, popen, probe
+from .media import ffmpeg_exe, popen, probe, run
 from .util import fmt
 
 FORMATS = {  # name -> (extension, encoder args; {br} = bitrate)
@@ -141,4 +141,88 @@ def render(media, st, progress):
             a_s, b_s = a / sr, (b / sr) if b is not None else duration
             w.writerow([fmt(a_s, True), fmt(b_s, True), fmt(new, True)])
             new += b_s - a_s
-    return {"file": str(out_path), "log": str(log_path), "removed": removed, "cuts": len(cuts)}
+    res = {"file": str(out_path), "log": str(log_path), "removed": removed, "cuts": len(cuts)}
+    if cfg.get("export_markers", True):
+        res["markers"] = write_markers(src, st)
+    if cfg.get("export_benefits", True):
+        progress(97, "كتابة ملف الفوائد")
+        b = write_benefits(src, st, ext, enc_args, sr_out)
+        if b:
+            res["benefits"] = b
+    return res
+
+
+BENEFIT = "فائدة"
+
+
+def write_markers(media, st):
+    """Labels on the ORIGINAL recording's timeline: Audacity (File > Import > Labels) and an EDL that
+    DaVinci Resolve reads as timeline markers (Timeline > Import > Timeline Markers from EDL;
+    25 fps, timeline starting at 01:00:00:00)."""
+    src = Path(media)
+    out_dir = output_dir(src)
+    rows = []
+    for it in sorted(st["items"], key=lambda i: i["start"]):
+        if it.get("category") == BENEFIT:
+            kind, color = "فائدة", "ResolveColorYellow"
+        elif it["status"] == "approved":
+            kind, color = "قص", "ResolveColorRed"
+        elif it["status"] == "kept":
+            kind, color = "يبقى", "ResolveColorGreen"
+        else:
+            kind, color = "لم يُحسم", "ResolveColorPurple"
+        label = f"{kind}: {it.get('label') or it.get('category') or ''}".strip()
+        rows.append((it["start"], it["end"], label.replace("\t", " ").replace("|", "/"), color))
+    aud = out_dir / f"{src.stem} - علامات Audacity.txt"
+    with open(aud, "w", encoding="utf-8", newline="\n") as f:
+        for s, e, label, _ in rows:
+            f.write(f"{s:.3f}\t{e:.3f}\t{label}\n")
+    fps = 25
+
+    def tc(fr):
+        return f"{fr // (3600 * fps):02d}:{fr // (60 * fps) % 60:02d}:{fr // fps % 60:02d}:{fr % fps:02d}"
+
+    edl = out_dir / f"{src.stem} - علامات DaVinci.edl"
+    with open(edl, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write(f"TITLE: {src.stem}\nFCM: NON-DROP FRAME\n\n")
+        for k, (s, e, label, color) in enumerate(rows, 1):
+            dur = max(1, int(round((e - s) * fps)))
+            f0 = int(round((s + 3600) * fps))     # the timeline starts at 01:00:00:00
+            f.write(f"{k:03d}  001      V     C        {tc(f0)} {tc(f0 + 1)} {tc(f0)} {tc(f0 + 1)}  \n")
+            f.write(f" |C:{color} |M:{label} |D:{dur}\n\n")
+    return [str(aud), str(edl)]
+
+
+def write_benefits(media, st, ext, enc_args, sr_out):
+    """The items marked فائدة, joined into one file with a short pause between them, plus an index."""
+    src = Path(media)
+    segs = sorted(([i["start"], i["end"], i.get("label", "")] for i in st["items"]
+                   if i.get("category") == BENEFIT and i["end"] - i["start"] > 0.5), key=lambda x: x[0])
+    if not segs:
+        return None
+    out_dir = output_dir(src)
+    out = out_dir / f"{src.stem} - فوائد{ext}"
+    tmp = out.with_name(out.stem + ".part" + ext)
+    parts, labels = [], []
+    for k, (a, b, _) in enumerate(segs):
+        fade = min(0.25, (b - a) / 4)
+        parts.append(f"[0:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,"
+                     f"afade=t=in:d={fade:.3f},afade=t=out:st={b - a - fade:.3f}:d={fade:.3f},"
+                     f"apad=pad_dur=0.8[s{k}]")
+        labels.append(f"[s{k}]")
+    graph = ";".join(parts) + ";" + "".join(labels) + f"concat=n={len(segs)}:v=0:a=1[out]"
+    r = run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(src), "-filter_complex", graph, "-map", "[out]",
+             "-ar", str(sr_out), *enc_args, "-f", {".m4a": "ipod", ".ogg": "ogg"}.get(ext, ext[1:]), str(tmp)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        raise SystemExit("فشل كتابة ملف الفوائد:\n" + (r.stderr or "")[-400:])
+    tmp.replace(out)
+    idx = out_dir / f"{src.stem} - فوائد.txt"
+    pos = 0.0
+    with open(idx, "w", encoding="utf-8") as f:
+        f.write(f"فوائد «{src.name}»\n\n")
+        for k, (a, b, label) in enumerate(segs, 1):
+            f.write(f"{k}. {label}\n   في ملف الفوائد: {fmt(pos)}    في الأصل: {fmt(a)} – {fmt(b)}\n")
+            pos += (b - a) + 0.8
+    return str(out)

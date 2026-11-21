@@ -29,10 +29,16 @@ DEFAULTS = {
     "output_dir": "",          # empty = a folder named منقح next to the recording
     "ffmpeg": "",              # empty = ffmpeg on PATH, else the bundled one
     "assist_batch_chars": 30000,
+    "suggest_silence": 5.0,    # suggest shortening silences longer than this (seconds); 0 = off
+    "suggest_loud": True,      # suggest sudden loud sounds (sneeze, cough, knock) anywhere in the file
+    "export_benefits": True,   # also write the items marked فائدة into a separate file
+    "export_markers": True,    # also write Audacity labels and a DaVinci Resolve marker list
+    "check_updates": True,
     "port": 8765,
 }
 
-MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base"]
+MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base", "tiny"]
+REPO = "hamza-nahhas/tanqih"
 
 
 def config_dir():

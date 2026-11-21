@@ -55,12 +55,28 @@ def transcribe_range(media, t0, t1, margin=10.0, duration=None):
     return words, segments
 
 
+def split_at_pauses(a, b, pauses, size=90.0):
+    """Cut a long range into pieces of about `size` seconds, each cut in the longest nearby pause,
+    so progress moves steadily and a cancelled job keeps what it finished."""
+    out, s = [], a
+    while b - s > size * 1.5:
+        t = s + size
+        near = [p for p in pauses if t - 20 <= (p[0] + p[1]) / 2 <= t + 20]
+        cut = round(sum(max(near, key=lambda p: p[1] - p[0])) / 2, 2) if near else t
+        out.append([s, cut])
+        s = cut
+    out.append([s, b])
+    return out
+
+
 def add_transcript(media, wins, duration, progress, pct0=20, pct1=100):
     tpath = transcript_path(media)
     tr = load_transcript(media)
+    pauses = (load_json(work_dir(media) / "analysis.json", {}) or {}).get("pauses", [])
     todo = []
     for w in merge_ranges(wins):
-        todo += subtract(w, tr["windows"])
+        for part in subtract(w, tr["windows"]):
+            todo += split_at_pauses(part[0], part[1], pauses)
     total = sum(b - a for a, b in todo)
     if not total:
         return tr
@@ -68,7 +84,8 @@ def add_transcript(media, wins, duration, progress, pct0=20, pct1=100):
     done, t_start = 0.0, time.time()
     for a, b in todo:
         el = time.time() - t_start
-        eta = f" — يبقى نحو {max(1, (total - done) / max(done / el, 0.1) / 60):.0f} دقيقة" if done > 30 and el > 5 else ""
+        left = (total - done) / max(done / el, 0.1) if done > 30 and el > 5 else None
+        eta = "" if left is None else (" — يبقى أقل من دقيقة" if left < 60 else f" — يبقى نحو {left / 60:.0f} دقيقة")
         progress(pct0 + (pct1 - pct0) * done / total,
                  f"تفريغ {done / 60:.0f} من {total / 60:.0f} دقيقة{eta}")
         words, segs = transcribe_range(media, a, b, duration=duration)
