@@ -51,3 +51,15 @@ jobs:
           done
           cat launcher.log
           exit 1
+
+      - name: Stop the interface (it keeps uv's cache locked otherwise)
+        if: always()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            taskkill //F //IM python.exe //T || true
+            taskkill //F //IM uv.exe //T || true
+          else
+            pkill -f "python -m tanqih" || true
+            pkill -f "uv run" || true
+          fi
