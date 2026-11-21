@@ -13,6 +13,11 @@ from .media import analyse, ensure_wav, frame_db
 from .transcribe import add_transcript
 
 _last = [0.0]
+for _s in (sys.stdout, sys.stderr):      # Arabic messages on a console that is not UTF-8
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
 
 
 def progress(pct, msg):
