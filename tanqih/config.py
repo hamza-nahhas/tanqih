@@ -35,7 +35,7 @@ DEFAULTS = {
     "export_benefits": True,   # also write the items marked فائدة into a separate file
     "export_markers": True,    # also write Audacity labels and a DaVinci Resolve marker list
     "check_updates": True,
-    "port": 8765,
+    "port": 8642,
 }
 
 MODELS = ["large-v3-turbo", "large-v3", "medium", "small", "base", "tiny"]

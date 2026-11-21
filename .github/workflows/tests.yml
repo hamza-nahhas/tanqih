@@ -36,7 +36,7 @@ jobs:
         run: |
           Start-Process -FilePath cmd.exe -ArgumentList '/c', 'start-windows.bat' -WindowStyle Hidden
           for ($i = 0; $i -lt 60; $i++) {
-            try { $r = Invoke-RestMethod http://127.0.0.1:8765/api/ping; if ($r.app -eq 'tanqih') { "ok $($r.version)"; exit 0 } } catch {}
+            try { $r = Invoke-RestMethod http://127.0.0.1:8642/api/ping; if ($r.app -eq 'tanqih') { "ok $($r.version)"; exit 0 } } catch {}
             Start-Sleep -Seconds 3
           }
           exit 1
@@ -46,7 +46,7 @@ jobs:
         run: |
           bash start-mac.command > launcher.log 2>&1 &
           for i in $(seq 1 60); do
-            if curl -fs http://127.0.0.1:8765/api/ping; then exit 0; fi
+            if curl -fs http://127.0.0.1:8642/api/ping; then exit 0; fi
             sleep 3
           done
           cat launcher.log

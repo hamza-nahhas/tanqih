@@ -472,6 +472,18 @@ class H(BaseHTTPRequestHandler):
             return self.send(500, {"error": f"{type(e).__name__}: {e}"})
 
 
+class Server(ThreadingHTTPServer):
+    # Python's server sets SO_REUSEADDR, which on Windows lets a second program bind the same port;
+    # requests would then land in the wrong program.  Ask for the port exclusively instead.
+    allow_reuse_address = False
+
+    def server_bind(self):
+        import socket
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def already_running(port):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1) as r:
@@ -482,7 +494,7 @@ def already_running(port):
 
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
-    port = int(settings().get("port") or 8765)
+    port = int(argv[argv.index("--port") + 1]) if "--port" in argv[:-1] else int(settings().get("port") or 8642)
     if already_running(port):
         url = f"http://127.0.0.1:{port}/"
         print("البرنامج يعمل من قبل:", url, flush=True)
@@ -492,7 +504,7 @@ def main(argv=None):
     srv = None
     for p in range(port, port + 20):
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", p), H)
+            srv = Server(("127.0.0.1", p), H)
             port = p
             break
         except OSError:
