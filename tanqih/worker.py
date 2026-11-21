@@ -22,24 +22,41 @@ def progress(pct, msg):
     print(f"PROGRESS {pct:.0f} {msg}", flush=True)
 
 
+def find_events(media):
+    from .config import settings
+    if not settings().get("detect_events", True):
+        return None
+    from .events import scan
+    try:
+        return scan(media, progress, 15, 35)
+    except Exception as e:  # noqa: BLE001  (no internet for the first download, ...)
+        print(f"INFO sound-event model unavailable: {e}", flush=True)
+        return None
+
+
 def prepare(media, full=False, transcribe=True):
     ensure_wav(media, progress)
     an = analyse(media, progress)
-    progress(15, "بناء البنود من قائمة الأوقات")
+    progress(13, "بناء البنود من قائمة الأوقات")
     st = load_state(media)
     merge_list(st, an)
     auto_propose(st, an, frame_db(media))
-    suggest(st, an, frame_db(media))
+    save_state(media, st)
+    events = find_events(media)
+    st = load_state(media)
+    merge_list(st, an)
+    auto_propose(st, an, frame_db(media))
+    suggest(st, an, frame_db(media), events=events)
     save_state(media, st)
     tr = None
     if full:
-        tr = add_transcript(media, [[0, an["duration"]]], an["duration"], progress)
+        tr = add_transcript(media, [[0, an["duration"]]], an["duration"], progress, pct0=35)
     elif transcribe:
-        tr = add_transcript(media, needed_windows(st), an["duration"], progress)
+        tr = add_transcript(media, needed_windows(st), an["duration"], progress, pct0=35)
     if tr and tr["words"]:
         st = load_state(media)  # re-read: the interface may have saved meanwhile
         auto_propose(st, an, frame_db(media), tr["words"])
-        suggest(st, an, frame_db(media), tr["words"])
+        suggest(st, an, frame_db(media), tr["words"], events)
         save_state(media, st)
     progress(100, "اكتمل التجهيز")
 

@@ -66,11 +66,14 @@ def main():
             from .assist import covered, format_window
             if not covered(tr, t0, t1):
                 print("تنبيه: جزء من هذا المدى غير مفرّغ. فرّغه بـ: python -m tanqih.worker transcribe <file> <from> <to>")
-            print("\n".join(format_window(tr["words"], an, frame_db(media), t0, t1)))
+            from .events import load_events
+            print("\n".join(format_window(tr["words"], an, frame_db(media), t0, t1, load_events(media))))
     elif cmd == "prompt":
         from .assist import export_batches
         ids = None if "--all" in a else {i["id"] for i in st["items"] if i["status"] in ("proposed", "pending")}
-        batches, skipped = export_batches(media.name, st, an, load_transcript(media), frame_db(media), ids)
+        from .events import load_events
+        batches, skipped = export_batches(media.name, st, an, load_transcript(media), frame_db(media), ids,
+                                          load_events(media))
         for k, b in enumerate(batches, 1):
             if len(batches) > 1:
                 print(f"\n########## الدفعة {k} من {len(batches)} ##########\n")

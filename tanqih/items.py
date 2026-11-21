@@ -10,6 +10,8 @@ item:
 """
 import hashlib
 
+import numpy as np
+
 from . import cutlist
 from .config import load_json, save_json, settings, work_dir
 from .media import loud_bursts
@@ -123,8 +125,8 @@ def needed_windows(st):
     wins = []
     for it in st["items"]:
         s, e = it["approx"]
-        if it.get("source") == "auto":   # found by the program itself: a little context is enough
-            wins.append([max(0, s - 20), min(D, e + 20)])
+        if it.get("source") == "auto":   # found by the program itself: its own window is enough
+            wins.append(list(it.get("window") or [max(0, s - 20), min(D, e + 20)]))
         elif e - s <= long_cut:
             wins.append([max(0, s - pad), min(D, e + pad)])
         else:
@@ -243,9 +245,61 @@ def _overlaps(a, b, items, pad=2.0):
     return any(i["start"] - pad < b and i["end"] + pad > a for i in items)
 
 
-def suggest(st, analysis, db, words=None):
-    """Add items for long silences and sudden loud sounds anywhere in the recording.
-    Undecided, untouched suggestions are rebuilt each time; decided ones are kept."""
+EVENT_NAMES = {"ضحك": "ضحك", "عطاس": "عطاس", "سعال": "سعال", "تصفيق": "تصفيق"}
+
+
+def _event_items(events, others, analysis, db, words, D):
+    """Items from the sound-event model. Sounds inside an existing item are noted on that item."""
+    pauses = analysis["pauses"]
+    new = []
+    for it in others:
+        it.pop("events", None)
+    for ev in events:
+        a0, a1, kind, p = ev["start"], ev["end"], ev["kind"], ev["score"]
+        host = next((i for i in others if i["start"] - 3 < a1 and i["end"] + 3 > a0
+                     or (i.get("point") and abs(i["approx"][0] - (a0 + a1) / 2) < 30)), None)
+        if host is not None:
+            host.setdefault("events", []).append({"kind": kind, "start": a0, "end": a1, "score": p})
+            continue
+        if kind in ("عطاس", "سعال"):
+            # the loudest moment inside the event is the sneeze / cough itself
+            i0, i1 = int(a0 / 0.02), max(int(a0 / 0.02) + 1, int(a1 / 0.02))
+            seg = db[i0:i1] if db is not None else None
+            peak = a0 + (int(np.argmax(seg)) * 0.02 if seg is not None and len(seg) else (a1 - a0) / 2)
+            if words is not None:
+                gap = _word_gap(words, peak - 0.15, peak + 0.15)
+                if gap is None:
+                    continue          # in the middle of speech: cannot be cut without cutting words
+                s, e = gap[0] + min(0.15, (gap[1] - gap[0]) / 6), gap[1] - min(0.15, (gap[1] - gap[0]) / 6)
+            else:
+                pb, pa = _pause_before(peak, pauses), _pause_after(peak, pauses)
+                s = min(pb[0] + 0.12, (pb[0] + pb[1]) / 2) if pb and peak - pb[1] < 1.5 else peak - 0.6
+                e = max(pa[1] - 0.12, (pa[0] + pa[1]) / 2) if pa and pa[0] - peak < 1.5 else peak + 0.6
+            if e - s > 15:
+                continue
+            new.append({"id": f"E{int(peak * 100)}", "label": EVENT_NAMES[kind], "category": "عطاس/سعال",
+                        "start": round(max(0, s), 2), "end": round(min(D, e), 2), "status": "proposed",
+                        "confidence": "high" if p >= 0.5 else "medium",
+                        "reason": f"اقتراح آلي: نموذج تمييز الأصوات سمع {EVENT_NAMES[kind]} هنا (ثقة {p:.0%})، "
+                                  "والقص يشمل الفترة بلا كلام حوله.",
+                        "window": [max(0, s - 20), min(D, e + 20)]})
+        else:
+            s, e = snap_range(a0, a1, pauses, D, reach=1.5)
+            new.append({"id": f"E{int(a0 * 100)}", "label": EVENT_NAMES[kind],
+                        "category": "مزح" if kind == "ضحك" else "أخرى",
+                        "start": s, "end": e, "status": "pending", "confidence": "low",
+                        "reason": (f"اقتراح آلي: ضحك مسموع (ثقة {p:.0%}). الأرجح أن قبله مزاحًا: استمع إلى ما قبله "
+                                   "ووسّع البداية إلى أول المزاح، أو استعن بالمساعد الذكي." if kind == "ضحك" else
+                                   f"اقتراح آلي: {EVENT_NAMES[kind]} (ثقة {p:.0%})."),
+                        "window": [max(0, a0 - 60), min(D, a1 + 30)]})
+    return new
+
+
+def suggest(st, analysis, db, words=None, events=None):
+    """Add items for long silences and sudden sounds anywhere in the recording.
+    With `events` (from the sound-event model) laughter, sneezes and coughs are named and placed;
+    without it, any sudden loud sound is suggested. Untouched suggestions are rebuilt each time;
+    decided ones are kept."""
     cfg = settings()
     D, pauses, sp = analysis["duration"], analysis["pauses"], analysis["speech_db"]
     keep = [i for i in st["items"] if i.get("source") != "auto" or i.get("edited")
@@ -264,6 +318,9 @@ def suggest(st, analysis, db, words=None):
                         "confidence": "low" if spoken else "high",
                         "reason": ("اقتراح آلي: سكتة طويلة لم يذكرها المراجعون، تُختصر إلى نحو ثلثي ثانية."
                                    + (" لكن في التفريغ كلامًا داخلها، فاستمع قبل القبول." if spoken else ""))})
+    if events is not None:
+        new += _event_items(events, others + new, analysis, db, words, D)
+    # sudden loud sounds the model did not name stay as "loud sound" (e.g. a sneeze over speech)
     if cfg.get("suggest_loud", True) and db is not None:
         for b0, b1, peak in loud_bursts(db, sp, 0, D, above=18, join=0.6):
             if b1 - b0 > 3 or _overlaps(b0, b1, others + new, 1.0):
@@ -285,8 +342,9 @@ def suggest(st, analysis, db, words=None):
     for n in new:
         if n["id"] in have:
             continue
+        n.setdefault("window", [max(0, n["start"] - 20), min(D, n["end"] + 20)])
         n.update(n="", action="cut", raw={}, approx=[n["start"], n["end"]], point=False, source="auto",
-                 proposed_by="auto", note="", window=[max(0, n["start"] - 20), min(D, n["end"] + 20)])
+                 proposed_by="auto", note="")
         keep.append(n)
     st["items"] = sorted(keep, key=lambda i: i["start"])
     return st

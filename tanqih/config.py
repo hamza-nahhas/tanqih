@@ -31,6 +31,7 @@ DEFAULTS = {
     "assist_batch_chars": 30000,
     "suggest_silence": 5.0,    # suggest shortening silences longer than this (seconds); 0 = off
     "suggest_loud": True,      # suggest sudden loud sounds (sneeze, cough, knock) anywhere in the file
+    "detect_events": True,     # a sound-event model names laughter, sneezes, coughs (about 2 min per hour of audio)
     "export_benefits": True,   # also write the items marked فائدة into a separate file
     "export_markers": True,    # also write Audacity labels and a DaVinci Resolve marker list
     "check_updates": True,

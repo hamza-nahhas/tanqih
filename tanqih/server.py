@@ -333,6 +333,7 @@ class H(BaseHTTPRequestHandler):
                     "id": parts[2], "name": m.name, "folder": str(m.parent),
                     "state": st, "analysis": load_json(d / "analysis.json"),
                     "transcript": load_transcript(m), "job": JOBS.public(parts[2]),
+                    "events": (load_json(d / "events.json", {}) or {}).get("events", []),
                 })
             if parts[:2] == ["api", "list"] and len(parts) == 3:
                 m = media_of(parts[2])
@@ -413,7 +414,9 @@ class H(BaseHTTPRequestHandler):
                         merge_list(st, an)
                         words = load_transcript(m)["words"] or None
                         auto_propose(st, an, frame_db(m), words)
-                        suggest(st, an, frame_db(m), words)
+                        from .events import events_path, load_events
+                        suggest(st, an, frame_db(m), words,
+                                load_events(m) if events_path(m).exists() else None)
                     save_state(m, st)
                 queued = False
                 if b.get("prepare", True) and (an or st["list"]["text"].strip()):
@@ -449,7 +452,8 @@ class H(BaseHTTPRequestHandler):
                     return self.send(400, {"error": "جهّز الملف أولًا"})
                 ids = b.get("ids")
                 batches, skipped = assist.export_batches(m.name, st, an, load_transcript(m), frame_db(m),
-                                                         set(ids) if ids is not None else None)
+                                                         set(ids) if ids is not None else None,
+                                                         (load_json(work_dir(m) / "events.json", {}) or {}).get("events"))
                 return self.send(200, {"batches": batches, "skipped": skipped})
             if act == "assist-import":
                 props = assist.extract_json(b.get("text", ""))

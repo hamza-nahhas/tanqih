@@ -153,7 +153,7 @@ async function openFile(id) {
   setView('file');
   S.fid = id; S.name = d.name;
   setName($('#fileName'), d.name); document.title = d.name + ' — تنقيح';
-  S.analysis = d.analysis; S.transcript = d.transcript;
+  S.analysis = d.analysis; S.transcript = d.transcript; S.events = d.events || [];
   S.state = d.state && d.analysis ? d.state : null;
   S.listState = d.state ? d.state.list : null;
   if (S.state) S.state.duration = d.analysis.duration;
@@ -286,6 +286,7 @@ function renderHead() {
   const listTxt = raw.start ? `في القائمة: <span class="ltr">${raw.start}${raw.end ? ' – ' + raw.end : ''}</span>` +
     (raw.time_ref === 'remaining' ? ' (وقت متبقٍّ، حُوّل إلى <span class="ltr">' + fmt(it.approx[0]) + (it.point ? '' : ' – ' + fmt(it.approx[1])) + '</span>)' : '') : it.source === 'ai' ? 'اقترحه المساعد' : 'أضيف يدويًا';
   $('#iMeta').innerHTML = ` · ${listTxt} · المدة ${dur(it.end - it.start)}` +
+    (it.events && it.events.length ? ' · سُمع: ' + it.events.map(e => `${e.kind} <span class="ltr">${fmt(e.start)}</span>`).join('، ') : '') +
     (it.orphan ? ' · <b class="errc">حُذف من القائمة</b>' : '') + (it.proposed_by === 'ai' || it.proposed_by === 'agent' ? ' · حدّده المساعد' : it.proposed_by === 'auto' ? ' · اقتراح آلي' : '');
   const r = $('#iReason');
   r.textContent = (it.action === 'decide' && it.status === 'pending' ? 'يحتاج قرارك: ' : '') + (it.reason || '');
@@ -508,6 +509,13 @@ function drawWave() {
     g.fillStyle = it.status === 'kept' ? P.keptFill : P.cutFill;
     g.fillRect(x0, top, x1 - x0, h);
   }
+  // sounds named by the sound-event model
+  for (const ev of S.events || []) {
+    if (ev.end < v0 || ev.start > v1) continue;
+    const x0 = t2x(ev.start), x1 = t2x(ev.end), col = EVCOL[ev.kind] || P.pend;
+    g.fillStyle = col; g.globalAlpha = 0.85; g.fillRect(x0, top, Math.max(2, x1 - x0), 3); g.globalAlpha = 1;
+    g.font = '11px Segoe UI'; g.fillText(ev.kind, Math.max(2, x0 + 2), top + 15);
+  }
   // waveform
   const spp = span * c.sr / W;
   g.fillStyle = P.wave;
@@ -647,6 +655,10 @@ function drawOverview() {
     const x0 = it.start / D * W, x1 = Math.max(x0 + 2, it.end / D * W);
     g.globalAlpha = 0.35; g.fillStyle = col[it.status]; g.fillRect(x0, 0, x1 - x0, H);
     g.globalAlpha = 1; g.fillRect(x0, 0, x1 - x0, 3);
+  }
+  for (const ev of S.events || []) {
+    const x = (ev.start + ev.end) / 2 / D * W;
+    g.fillStyle = EVCOL[ev.kind] || P.pend; g.beginPath(); g.arc(x, H - 4, 2.5, 0, 7); g.fill();
   }
   if (S.cur && S.clip) {
     g.strokeStyle = P.ovFrame; g.lineWidth = 1.5;
@@ -911,6 +923,7 @@ async function widen() {
 /* ---------- background jobs ---------- */
 let JOBS = {};
 const KIND = { render: 'التصدير', prepare: 'التجهيز', transcribe: 'التفريغ' };
+const EVCOL = { 'ضحك': '#f2b544', 'عطاس': '#ff6b9a', 'سعال': '#c58cff', 'تصفيق': '#3ccf8e' };
 async function startJob(kind, body, fid = S.fid) {
   if (!fid) return;
   try {
@@ -984,7 +997,7 @@ $('#jobCancel').onclick = async () => {
 async function reloadData() {
   await flushSave();
   const d = await api('/api/file/' + S.fid);
-  S.transcript = d.transcript; S.analysis = d.analysis; S.listState = d.state ? d.state.list : null;
+  S.transcript = d.transcript; S.analysis = d.analysis; S.events = d.events || []; S.listState = d.state ? d.state.list : null;
   if (!S.state || !d.state) { const id = S.fid; S.fid = null; await openFile(id); return; }
   const curId = S.cur && !S.cur.free ? S.cur.id : null, free = S.cur && S.cur.free ? S.cur : null;
   S.state = d.state; S.state.duration = d.analysis.duration; S.items = S.state.items;
@@ -1118,7 +1131,7 @@ function openSettings() {
   $('#sPad').value = s.window_pad; $('#sFormat').value = s.output_format; $('#sBitrate').value = s.output_bitrate;
   $('#sOut').value = s.output_dir || ''; $('#sBatch').value = s.assist_batch_chars; $('#sFfmpeg').value = s.ffmpeg || '';
   $('#sSil').value = s.suggest_silence; $('#sLoud').checked = !!s.suggest_loud; $('#sBenefits').checked = !!s.export_benefits;
-  $('#sMarkers').checked = !!s.export_markers; $('#sUpdates').checked = !!s.check_updates;
+  $('#sMarkers').checked = !!s.export_markers; $('#sUpdates').checked = !!s.check_updates; $('#sEvents').checked = !!s.detect_events;
   $('#sVer').textContent = 'الإصدار ' + (CFG.version || '');
   openModal('#settingsDlg');
 }
@@ -1128,7 +1141,7 @@ $('#sSave').onclick = async () => {
     window_pad: +$('#sPad').value || 150, output_format: $('#sFormat').value, output_bitrate: $('#sBitrate').value,
     output_dir: $('#sOut').value.trim(), assist_batch_chars: +$('#sBatch').value || 30000, ffmpeg: $('#sFfmpeg').value.trim(),
     suggest_silence: Math.max(0, +$('#sSil').value || 0), suggest_loud: $('#sLoud').checked, export_benefits: $('#sBenefits').checked,
-    export_markers: $('#sMarkers').checked, check_updates: $('#sUpdates').checked,
+    export_markers: $('#sMarkers').checked, check_updates: $('#sUpdates').checked, detect_events: $('#sEvents').checked,
   });
   CFG.settings = r.settings; closeModal($('#settingsDlg')); toast('حُفظت الإعدادات');
 };

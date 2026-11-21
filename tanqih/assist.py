@@ -24,6 +24,7 @@ INSTRUCTIONS = """\
 - كل سطر يبدأ بوقت بدايته ونهايته [س:د:ث.ث–س:د:ث.ث]. الأسطر تنقطع عند كل سكتة، وعند كل ست ثوانٍ تقريبًا في الكلام المتصل. أفضل مواضع القطع سكتة بين سطرين (نهاية السطر أبكر من بداية الذي يليه).
 - «… فجوة» تعني مدة لم يُفرَّغ فيها كلام. إن كان «النشاط الصوتي» فيها مرتفعًا فقد يكون فيها كلام أسقطه التفريغ (يحدث هذا كثيرًا مع الكلام الجانبي البعيد عن المِكروفون).
 - «أصوات مرتفعة» أصوات مفاجئة أعلى من مستوى الكلام: عطاس، سعال، ضحك، طرق.
+- «أصوات ميّزها نموذج الأصوات» تسمّي الصوت: ضحك أو عطاس أو سعال، بمدى تقريبي (قطع من ثلاث ثوانٍ). الضحك يأتي غالبًا بعد المزاح، فابحث قبله عن بداية المزاح في التفريغ.
 - التفريغ آلي وقد يخطئ في بعض الكلمات؛ الكلمة المتبوعة بـ؟ ضعيفة الثقة.
 
 قواعد الحذف:
@@ -60,7 +61,10 @@ def _level(db, analysis, t0, t1):
     return float(np.max(x) - analysis["speech_db"]), float(np.mean(x > analysis["pause_threshold_db"]))
 
 
-def format_window(words, analysis, db, a, b):
+EVENT_WORDS = {"ضحك": "ضحك", "عطاس": "عطاس", "سعال": "سعال", "تصفيق": "تصفيق"}
+
+
+def format_window(words, analysis, db, a, b, events=None):
     ws = [w for w in words if a <= (w["s"] + w["e"]) / 2 <= b]
     out, line, l0, prev = [], [], None, None
 
@@ -84,6 +88,10 @@ def format_window(words, analysis, db, a, b):
     bursts = loud_bursts(db, analysis["speech_db"], a, b, above=14)
     if bursts:
         out.append("أصوات مرتفعة: " + "، ".join(f"{fmt(s, True)[:-1]} (+{p:.0f} dB)" for s, e, p in bursts[:20]))
+    evs = [e for e in (events or []) if e["start"] < b and e["end"] > a]
+    if evs:
+        out.append("أصوات ميّزها نموذج الأصوات: " + "، ".join(
+            f"{EVENT_WORDS.get(e['kind'], e['kind'])} {fmt(e['start'])}–{fmt(e['end'])} (ثقة {e['score']:.0%})" for e in evs))
     if not ws:
         out.append("(لا كلام مفرَّغ في هذا المدى)")
     return out
@@ -94,7 +102,7 @@ def covered(transcript, a, b):
     return got >= (b - a) - 3
 
 
-def item_block(it, analysis, transcript, db):
+def item_block(it, analysis, transcript, db, events=None):
     pad = settings()["window_pad"]
     long_cut = settings()["long_cut"]
     D = analysis["duration"]
@@ -121,17 +129,17 @@ def item_block(it, analysis, transcript, db):
         if k:
             lines.append(f"  … (وسط البند لا يُعرض: من {fmt(ranges[0][1])} إلى {fmt(a)}) …")
         lines.append(f"التفريغ من {fmt(a)} إلى {fmt(b)}:")
-        lines += format_window(transcript["words"], analysis, db, a, b)
+        lines += format_window(transcript["words"], analysis, db, a, b, events)
     return "\n".join(lines), bool(missing)
 
 
-def export_batches(name, st, analysis, transcript, db, ids=None):
+def export_batches(name, st, analysis, transcript, db, ids=None, events=None):
     items = [it for it in st["items"] if (ids is None or it["id"] in ids)]
     head = INSTRUCTIONS.format(name=name, duration=fmt(analysis["duration"]))
     limit = int(settings().get("assist_batch_chars") or 30000)
     blocks, skipped = [], []
     for it in items:
-        txt, missing = item_block(it, analysis, transcript, db)
+        txt, missing = item_block(it, analysis, transcript, db, events)
         if missing:
             skipped.append(it["id"])
             continue

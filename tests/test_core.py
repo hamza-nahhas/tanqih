@@ -251,3 +251,54 @@ class Whisper(unittest.TestCase):
         config.save_settings({"whisper_model": "tiny"})
         words, segs = transcribe.transcribe_range(src, 0, 8, duration=8)
         self.assertIsInstance(words, list)
+
+
+class Events(unittest.TestCase):
+    def test_features_shape_and_padding(self):
+        import numpy as np
+        from tanqih import events
+        x = events.features(np.zeros(16000 * 3, dtype=np.float32))
+        self.assertEqual(x.shape, (1024, 128))
+        # padding frames are zeros before normalization, as in transformers' ASTFeatureExtractor
+        self.assertAlmostEqual(float(x[-1, 0]), (0 - events.MEAN) / (events.STD * 2), places=5)
+        fb = events._mel_filters()
+        self.assertEqual(fb.shape, (257, 128))
+        # the lowest filters are narrower than one FFT bin and stay empty, as in the reference code
+        self.assertGreaterEqual(int((fb.sum(axis=0) > 0).sum()), 120)
+
+    def test_event_items(self):
+        import numpy as np
+        from tanqih import items as I
+        an = analysis(600.0)
+        db = np.full(30000, -40.0, dtype=np.float32)
+        db[int(100.4 / 0.02)] = 0
+        words = [{"w": "قبل", "s": 99.0, "e": 99.6, "p": 1}, {"w": "بعد", "s": 102.0, "e": 102.5, "p": 1},
+                 {"w": "كلام", "s": 199.0, "e": 201.5, "p": 1}]
+        host = {"id": "L1", "start": 300.0, "end": 320.0, "approx": [300, 320], "point": False,
+                "status": "approved", "source": "list", "label": "مزح"}
+        evs = [{"kind": "عطاس", "start": 99.5, "end": 101.5, "score": 0.9},     # in a silent gap
+               {"kind": "سعال", "start": 199.5, "end": 201.0, "score": 0.8},    # over speech: skipped
+               {"kind": "ضحك", "start": 310.0, "end": 313.0, "score": 0.3},     # inside a listed joke
+               {"kind": "ضحك", "start": 400.0, "end": 403.0, "score": 0.2}]     # new laughter
+        new = I._event_items(evs, [host], an, db, words, 600.0)
+        self.assertEqual([(n["label"], n["status"]) for n in new], [("عطاس", "proposed"), ("ضحك", "pending")])
+        self.assertEqual((new[0]["start"], new[0]["end"]), (99.6 + 0.15, 102.0 - 0.15))
+        self.assertEqual(host["events"][0]["kind"], "ضحك")
+        self.assertLess(new[1]["window"][0], 400 - 50)     # laughter: show the minute before it
+
+
+@unittest.skipUnless(os.environ.get("TANQIH_TEST_WHISPER"), "set TANQIH_TEST_WHISPER=1 to load the models")
+class EventModel(unittest.TestCase):
+    def test_scan_runs_and_caches(self):
+        from tanqih import events
+        folder = Path(TMP) / "rec4"
+        folder.mkdir(exist_ok=True)
+        src = folder / "tone.wav"
+        tone_file(src, 25)
+        ev = events.scan(src)
+        self.assertIsInstance(ev, list)
+        self.assertTrue(events.events_path(src).exists())
+        import numpy as np
+        s = events.classify([np.zeros(16000 * 5, dtype=np.float32)])[0]
+        _, labels = events._load()
+        self.assertEqual(labels[int(np.argmax(s))], "Silence")

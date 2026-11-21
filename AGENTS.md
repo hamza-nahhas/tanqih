@@ -11,7 +11,8 @@ Windows and `.venv/bin/python` on macOS. Times are seconds or `h:mm:ss(.s)`.
 
 ```
 python -m tanqih items  <file>                 # items: id, status, current range, label, reviewer's time
-python -m tanqih peek   <file> <from> <to>     # timed transcript lines, silent gaps, loud sounds
+python -m tanqih peek   <file> <from> <to>     # timed transcript lines, silent gaps, loud sounds,
+                                               # and laughter / sneezes / coughs named by the sound model
 python -m tanqih words  <file> <from> <to>     # one word per line: start end probability word
 python -m tanqih prompt <file> [--all]         # the same text the interface gives to chat assistants
 python -m tanqih apply  <file> proposals.json [--force]
